@@ -769,7 +769,6 @@ private:
     int32_t last_mixer_crc = -1;
 #endif // CONFIG_HAL_BOARD
     
-    void demo_servos(uint8_t i);
     void adjust_nav_pitch_throttle(void);
     void update_load_factor(void);
     void send_heartbeat(mavlink_channel_t chan);
@@ -826,7 +825,7 @@ private:
     int32_t get_RTL_altitude();
     float relative_altitude(void);
     int32_t relative_altitude_abs_cm(void);
-    float relative_ground_altitude(void);
+    float relative_ground_altitude(bool use_rangefinder_if_available);
     void set_target_altitude_current(void);
     void set_target_altitude_current_adjusted(void);
     void set_target_altitude_location(const Location &loc);

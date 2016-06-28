@@ -596,6 +596,7 @@ bool GCS_MAVLINK_Rover::try_send_message(enum ap_message id)
         break;
 
     case MSG_RETRY_DEFERRED:
+    case MSG_ADSB_VEHICLE:
     case MSG_TERRAIN:
     case MSG_OPTICAL_FLOW:
     case MSG_GIMBAL_REPORT:
@@ -864,7 +865,7 @@ void GCS_MAVLINK_Rover::handleMessage(mavlink_message_t* msg)
             // Sets the region of interest (ROI) for the camera
             case MAV_CMD_DO_SET_ROI:
                 // sanity check location
-                if (fabsf(packet.param5) > 90.0f || fabsf(packet.param6) > 180.0f) {
+                if (!check_latlng(packet.param5, packet.param6)) {
                     break;
                 }
                 Location roi_loc;
@@ -1095,7 +1096,7 @@ void GCS_MAVLINK_Rover::handleMessage(mavlink_message_t* msg)
                     break;
                 }
                 // sanity check location
-                if (fabsf(packet.param5) > 90.0f || fabsf(packet.param6) > 180.0f) {
+                if (!check_latlng(packet.param5, packet.param6)) {
                     break;
                 }
                 Location new_home_loc {};
@@ -1268,6 +1269,11 @@ void GCS_MAVLINK_Rover::handleMessage(mavlink_message_t* msg)
 			mavlink_hil_state_t packet;
 			mavlink_msg_hil_state_decode(msg, &packet);
 			
+            // sanity check location
+            if (!check_latlng(packet.lat, packet.lon)) {
+                break;
+            }
+
             // set gps hil sensor
             Location loc;
             loc.lat = packet.lat;

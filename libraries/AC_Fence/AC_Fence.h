@@ -5,12 +5,15 @@
 #include <AP_Common/AP_Common.h>
 #include <AP_Param/AP_Param.h>
 #include <AP_Math/AP_Math.h>
+#include <GCS_MAVLink/GCS_MAVLink.h>
 #include <AP_InertialNav/AP_InertialNav.h>     // Inertial Navigation library
+#include <AC_Fence/AC_PolyFence_loader.h>
 
 // bit masks for enabled fence types.  Used for TYPE parameter
 #define AC_FENCE_TYPE_NONE                          0       // fence disabled
 #define AC_FENCE_TYPE_ALT_MAX                       1       // high alt fence which usually initiates an RTL
 #define AC_FENCE_TYPE_CIRCLE                        2       // circular horizontal fence (usually initiates an RTL)
+#define AC_FENCE_TYPE_POLYGON                       4       // polygon horizontal fence
 
 // valid actions should a fence be breached
 #define AC_FENCE_ACTION_REPORT_ONLY                 0       // report to GCS that boundary has been breached but take no further action
@@ -75,6 +78,12 @@ public:
     /// get_safe_alt - returns maximum safe altitude (i.e. alt_max - margin)
     float get_safe_alt() const { return _alt_max - _margin; }
 
+    /// get_radius - returns the fence radius in meters
+    float get_radius() const { return _circle_radius.get(); }
+
+    /// get_margin - returns the fence margin in meters
+    float get_margin() const { return _margin.get(); }
+
     /// manual_recovery_start - caller indicates that pilot is re-taking manual control so fence should be disabled for 10 seconds
     ///     should be called whenever the pilot changes the flight mode
     ///     has no effect if no breaches have occurred
@@ -87,6 +96,19 @@ public:
     /// set_home_distance - update vehicle's distance from home in meters - required for circular horizontal fence monitoring
     void set_home_distance(float distance) { _home_distance = distance; }
 
+    ///
+    /// polygon related methods
+    ///
+
+    /// returns pointer to array of polygon points and num_points is filled in with the total number
+    Vector2f* get_polygon_points(uint16_t& num_points) const;
+
+    /// returns true if we've breached the polygon boundary.  simple passthrough to underlying _poly_loader object
+    bool boundary_breached(const Vector2f& location, uint16_t num_points, const Vector2f* points) const;
+
+    /// handler for polygon fence messages with GCS
+    void handle_msg(mavlink_channel_t chan, mavlink_message_t* msg);
+
     static const struct AP_Param::GroupInfo var_info[];
 
 private:
@@ -96,6 +118,9 @@ private:
 
     /// clear_breach - update breach bitmask, time and count
     void clear_breach(uint8_t fence_type);
+
+    /// load polygon points stored in eeprom into boundary array and perform validation.  returns true if load successfully completed
+    bool load_polygon_from_eeprom(bool force_reload = false);
 
     // pointers to other objects we depend upon
     const AP_InertialNav& _inav;
@@ -107,6 +132,7 @@ private:
     AP_Float        _alt_max;               // altitude upper limit in meters
     AP_Float        _circle_radius;         // circle fence radius in meters
     AP_Float        _margin;                // distance in meters that autopilot's should maintain from the fence to avoid a breach
+    AP_Int8         _total;                 // number of polygon points saved in eeprom
 
     // backup fences
     float           _alt_max_backup;        // backup altitude upper limit in meters used to refire the breach if the vehicle continues to move further away
@@ -125,4 +151,13 @@ private:
     uint16_t        _breach_count;          // number of times we have breached the fence
 
     uint32_t        _manual_recovery_start_ms;  // system time in milliseconds that pilot re-took manual control
+
+    // polygon fence variables
+    AC_PolyFence_loader _poly_loader;               // helper for loading/saving polygon points
+    Vector2f        *_boundary = NULL;              // array of boundary points.  Note: point 0 is the return point
+    uint8_t         _boundary_num_points = 0;       // number of points in the boundary array (should equal _total parameter after load has completed)
+    bool            _boundary_create_attempted = false; // true if we have attempted to create the boundary array
+    bool            _boundary_loaded = false;       // true if boundary array has been loaded from eeprom
+    bool            _boundary_valid = false;        // true if boundary forms a closed polygon
+    bool            _boundary_revalidate = false;   // set to true when we need to revalidate the boundary (required after a point is changed)
 };

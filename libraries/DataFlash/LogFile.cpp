@@ -803,7 +803,9 @@ void DataFlash_Class::Log_Write_RCOUT(void)
         chan9         : hal.rcout->read(8),
         chan10        : hal.rcout->read(9),
         chan11        : hal.rcout->read(10),
-        chan12        : hal.rcout->read(11)
+        chan12        : hal.rcout->read(11),
+        chan13        : hal.rcout->read(12),
+        chan14        : hal.rcout->read(13)
     };
     WriteBlock(&pkt, sizeof(pkt));
     Log_Write_ESC();
@@ -1072,8 +1074,8 @@ void DataFlash_Class::Log_Write_Power(void)
     struct log_POWR pkt = {
         LOG_PACKET_HEADER_INIT(LOG_POWR_MSG),
         time_us : AP_HAL::micros64(),
-        Vcc     : (uint16_t)(hal.analogin->board_voltage() * 100),
-        Vservo  : (uint16_t)(hal.analogin->servorail_voltage() * 100),
+        Vcc     : hal.analogin->board_voltage(),
+        Vservo  : hal.analogin->servorail_voltage(),
         flags   : hal.analogin->power_status_flags()
     };
     WriteBlock(&pkt, sizeof(pkt));
@@ -1638,20 +1640,29 @@ void DataFlash_Class::Log_Write_Attitude(AP_AHRS &ahrs, const Vector3f &targets)
 }
 
 // Write an Current data packet
-void DataFlash_Class::Log_Write_Current(const AP_BattMonitor &battery, int16_t throttle)
+void DataFlash_Class::Log_Write_Current(const AP_BattMonitor &battery)
 {
-    float voltage2 = battery.voltage2();
-    struct log_Current pkt = {
-        LOG_PACKET_HEADER_INIT(LOG_CURRENT_MSG),
-        time_us             : AP_HAL::micros64(),
-        throttle        	: throttle,
-        battery_voltage     : (int16_t) (battery.voltage() * 100.0f),
-        current_amps        : (int16_t) (battery.current_amps() * 100.0f),
-        board_voltage       : (uint16_t)(hal.analogin->board_voltage()*1000),
-        current_total       : battery.current_total_mah(),
-        battery2_voltage    : (int16_t)(voltage2 * 100.0f)
-    };
-    WriteBlock(&pkt, sizeof(pkt));
+    if (battery.num_instances() >= 1) {
+        struct log_Current pkt = {
+            LOG_PACKET_HEADER_INIT(LOG_CURRENT_MSG),
+            time_us             : AP_HAL::micros64(),
+            battery_voltage     : battery.voltage(0),
+            current_amps        : battery.current_amps(0),
+            current_total       : battery.current_total_mah(0),
+        };
+        WriteBlock(&pkt, sizeof(pkt));
+    }
+
+    if (battery.num_instances() >= 2) {
+        struct log_Current pkt = {
+            LOG_PACKET_HEADER_INIT(LOG_CURRENT2_MSG),
+            time_us             : AP_HAL::micros64(),
+            battery_voltage     : battery.voltage(1),
+            current_amps        : battery.current_amps(1),
+            current_total       : battery.current_total_mah(1),
+        };
+        WriteBlock(&pkt, sizeof(pkt));
+    }
 }
 
 // Write a Compass packet
@@ -1851,14 +1862,14 @@ void DataFlash_Class::Log_Write_Rate(const AP_AHRS &ahrs,
     struct log_Rate pkt_rate = {
         LOG_PACKET_HEADER_INIT(LOG_RATE_MSG),
         time_us         : AP_HAL::micros64(),
-        control_roll    : (float)rate_targets.x,
-        roll            : (float)(ahrs.get_gyro().x * AC_ATTITUDE_CONTROL_DEGX100),
+        control_roll    : degrees(rate_targets.x),
+        roll            : degrees(ahrs.get_gyro().x),
         roll_out        : motors.get_roll(),
-        control_pitch   : (float)rate_targets.y,
-        pitch           : (float)(ahrs.get_gyro().y * AC_ATTITUDE_CONTROL_DEGX100),
+        control_pitch   : degrees(rate_targets.y),
+        pitch           : degrees(ahrs.get_gyro().y),
         pitch_out       : motors.get_pitch(),
-        control_yaw     : (float)rate_targets.z,
-        yaw             : (float)(ahrs.get_gyro().z * AC_ATTITUDE_CONTROL_DEGX100),
+        control_yaw     : degrees(rate_targets.z),
+        yaw             : degrees(ahrs.get_gyro().z),
         yaw_out         : motors.get_yaw(),
         control_accel   : (float)accel_target.z,
         accel           : (float)(-(ahrs.get_accel_ef_blended().z + GRAVITY_MSS) * 100.0f),

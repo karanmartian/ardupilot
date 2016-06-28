@@ -740,6 +740,11 @@ bool GCS_MAVLINK_Copter::try_send_message(enum ap_message id)
     case MSG_MAG_CAL_REPORT:
         copter.compass.send_mag_cal_report(chan);
         break;
+
+    case MSG_ADSB_VEHICLE:
+        CHECK_PAYLOAD_SIZE(ADSB_VEHICLE);
+        copter.adsb.send_adsb_vehicle(chan);
+        break;
     }
 
     return true;
@@ -827,7 +832,16 @@ const AP_Param::GroupInfo GCS_MAVLINK::var_info[] = {
     // @Increment: 1
     // @User: Advanced
     AP_GROUPINFO("PARAMS",   8, GCS_MAVLINK, streamRates[8],  0),
-    AP_GROUPEND
+
+    // @Param: ADSB
+    // @DisplayName: ADSB stream rate to ground station
+    // @Description: ADSB stream rate to ground station
+    // @Units: Hz
+    // @Range: 0 50
+    // @Increment: 1
+    // @User: Advanced
+    AP_GROUPINFO("ADSB",   9, GCS_MAVLINK, streamRates[9],  5),
+AP_GROUPEND
 };
 
 void
@@ -932,6 +946,12 @@ GCS_MAVLINK_Copter::data_stream_send(void)
         send_message(MSG_EKF_STATUS_REPORT);
         send_message(MSG_VIBRATION);
         send_message(MSG_RPM);
+    }
+
+    if (copter.gcs_out_of_time) return;
+
+    if (stream_trigger(STREAM_ADSB)) {
+        send_message(MSG_ADSB_VEHICLE);
     }
 }
 
@@ -1129,7 +1149,7 @@ void GCS_MAVLINK_Copter::handleMessage(mavlink_message_t* msg)
                 // y : lon
                 // z : alt
                 // sanity check location
-                if (labs(packet.x) >= 900000000l || labs(packet.y) >= 1800000000l) {
+                if (!check_latlng(packet.x, packet.y)) {
                     break;
                 }
                 Location roi_loc;
@@ -1244,7 +1264,7 @@ void GCS_MAVLINK_Copter::handleMessage(mavlink_message_t* msg)
                 }
             } else {
                 // sanity check location
-                if (fabsf(packet.param5) > 90.0f || fabsf(packet.param6) > 180.0f) {
+                if (!check_latlng(packet.param5, packet.param6)) {
                     break;
                 }
                 Location new_home_loc;
@@ -1274,7 +1294,7 @@ void GCS_MAVLINK_Copter::handleMessage(mavlink_message_t* msg)
             // param6 : y / lon
             // param7 : z / alt
             // sanity check location
-            if (fabsf(packet.param5) > 90.0f || fabsf(packet.param6) > 180.0f) {
+            if (!check_latlng(packet.param5, packet.param6)) {
                 break;
             }
             Location roi_loc;
@@ -1784,6 +1804,11 @@ void GCS_MAVLINK_Copter::handleMessage(mavlink_message_t* msg)
         Vector3f pos_ned;
 
         if(!pos_ignore) {
+            // sanity check location
+            if (!check_latlng(packet.lat_int, packet.lon_int)) {
+                result = MAV_RESULT_FAILED;
+                break;
+            }
             Location loc;
             loc.lat = packet.lat_int;
             loc.lng = packet.lon_int;
@@ -1837,6 +1862,11 @@ void GCS_MAVLINK_Copter::handleMessage(mavlink_message_t* msg)
     {
         mavlink_hil_state_t packet;
         mavlink_msg_hil_state_decode(msg, &packet);
+
+        // sanity check location
+        if (!check_latlng(packet.lat, packet.lon)) {
+            break;
+        }
 
         // set gps hil sensor
         Location loc;
@@ -1914,6 +1944,14 @@ void GCS_MAVLINK_Copter::handleMessage(mavlink_message_t* msg)
         break;
 #endif
 
+#if AC_FENCE == ENABLED
+    // send or receive fence points with GCS
+    case MAVLINK_MSG_ID_FENCE_POINT:            // MAV ID: 160
+    case MAVLINK_MSG_ID_FENCE_FETCH_POINT:
+        copter.fence.handle_msg(chan, msg);
+        break;
+#endif // AC_FENCE == ENABLED
+
 #if CAMERA == ENABLED
     //deprecated.  Use MAV_CMD_DO_DIGICAM_CONFIGURE
     case MAVLINK_MSG_ID_DIGICAM_CONFIGURE:      // MAV ID: 202
@@ -1958,6 +1996,11 @@ void GCS_MAVLINK_Copter::handleMessage(mavlink_message_t* msg)
 
         if (packet.count != copter.rally.get_rally_total()) {
             send_text(MAV_SEVERITY_NOTICE,"Bad rally point message count");
+            break;
+        }
+
+        // sanity check location
+        if (!check_latlng(packet.lat, packet.lng)) {
             break;
         }
 
@@ -2022,7 +2065,7 @@ void GCS_MAVLINK_Copter::handleMessage(mavlink_message_t* msg)
             copter.set_home_to_current_location_and_lock();
         } else {
             // sanity check location
-            if (labs(packet.latitude) > 90*10e7 || labs(packet.longitude) > 180 * 10e7) {
+            if (!check_latlng(packet.latitude, packet.longitude)) {
                 break;
             }
             Location new_home_loc;
